@@ -4,10 +4,15 @@ description = "Nexus backend — FastAPI app for the personal knowledge search e
 version = "0.1.0"
 requires-python = ">=3.13"
 dependencies = [
+    "alembic>=1.19.1",
+    "argon2-cffi>=25.1.0",
+    "asyncpg>=0.31.0",
     "fastapi>=0.141.1",
+    "psycopg[binary]>=3.2",
     "pydantic>=2.13.4",
     "pydantic-settings>=2.15.0",
     "python-multipart>=0.0.32",
+    "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.52.1",
 ]
 
@@ -22,10 +27,13 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py313"
+extend-exclude = ["migrations"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "session"
+asyncio_default_test_loop_scope = "session"
 testpaths = ["tests"]

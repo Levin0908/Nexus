@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -17,6 +17,23 @@ class Settings(BaseSettings):
     debug: bool = False
     api_prefix: str = "/api/v1"
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+
+    database_url: str = "postgresql+asyncpg://nexus:nexus_dev_pw@localhost:5432/nexus"
+    database_echo: bool = False
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
+
+    password_time_cost: int = 3
+    password_memory_cost: int = 65536
+    password_parallelism: int = 4
+    password_hash_len: int = 32
+    password_salt_len: int = 16
+    password_max_length: int = 128
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def database_url_sync(self) -> str:
+        return self.database_url.replace("+asyncpg", "+psycopg", 1)
 
 
 @lru_cache
