@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.security import password_hasher
@@ -12,14 +12,6 @@ from app.models.user import User
 @pytest.fixture
 async def fresh_user_email() -> str:
     return f"test-{uuid.uuid4()}@example.com"
-
-
-@pytest.fixture(autouse=True)
-async def _cleanup_users() -> None:
-    yield
-    async with SessionLocal() as session:
-        await session.execute(delete(User).where(User.email.like("test-%@example.com")))
-        await session.commit()
 
 
 async def test_create_and_retrieve_user(fresh_user_email: str) -> None:

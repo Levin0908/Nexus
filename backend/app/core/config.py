@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     password_salt_len: int = 16
     password_max_length: int = 128
 
+    jwt_secret_key: str | None = None
+    jwt_algorithm: str = "HS256"
+    jwt_access_ttl_minutes: int = 15
+    jwt_refresh_ttl_days: int = 7
+
     @computed_field  # type: ignore[prop-decorator]
     @property
     def database_url_sync(self) -> str:
