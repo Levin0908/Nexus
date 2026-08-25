@@ -1,25 +1,29 @@
 from __future__ import annotations
 
-from typing import Annotated
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.deps import CurrentUser, DbSession
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
     create_refresh_token,
+    decode_token,
     password_hasher,
 )
-from app.db.session import get_db
 from app.models.user import User
-from app.schemas.auth import LoginRequest, RegisterRequest, TokenResponse
+from app.schemas.auth import (
+    LoginRequest,
+    RefreshRequest,
+    RegisterRequest,
+    TokenResponse,
+)
+from app.schemas.user import UserPublic
 
 router = APIRouter()
-
-DbSession = Annotated[AsyncSession, Depends(get_db)]
 
 
 def _build_token_response(user: User) -> TokenResponse:
@@ -91,3 +95,43 @@ async def login(body: LoginRequest, db: DbSession) -> TokenResponse:
         )
 
     return _build_token_response(user)
+
+
+@router.post("/refresh", response_model=TokenResponse)
+async def refresh(body: RefreshRequest, db: DbSession) -> TokenResponse:
+    try:
+        claims = decode_token(body.refresh_token, expected_type="refresh")
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        ) from None
+
+    subject = claims.get("sub")
+    if not subject:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        )
+
+    try:
+        user_id = uuid.UUID(subject)
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        ) from None
+
+    user = await db.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid token",
+        )
+
+    return _build_token_response(user)
+
+
+@router.get("/me", response_model=UserPublic)
+async def me(current_user: CurrentUser) -> UserPublic:
+    return UserPublic.model_validate(current_user)

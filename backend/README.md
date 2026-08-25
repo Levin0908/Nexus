@@ -51,21 +51,30 @@ uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 ## Auth
 
-Two endpoints issue access + refresh JWTs.
+Four endpoints cover the full auth lifecycle.
 
 ```bash
-# Register
+# Register (creates user, returns tokens)
 curl -X POST http://127.0.0.1:8000/api/v1/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"you@example.com","password":"correct-horse-battery-staple"}'
 
-# Login
+# Login (returns tokens)
 curl -X POST http://127.0.0.1:8000/api/v1/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"you@example.com","password":"correct-horse-battery-staple"}'
+
+# Refresh (exchanges a refresh token for a new access token)
+curl -X POST http://127.0.0.1:8000/api/v1/auth/refresh \
+  -H "Content-Type: application/json" \
+  -d '{"refresh_token":"<refresh-token>"}'
+
+# Me (protected — requires a valid access token in the Authorization header)
+curl http://127.0.0.1:8000/api/v1/auth/me \
+  -H "Authorization: Bearer <access-token>"
 ```
 
-Both return `TokenResponse`:
+`/register` and `/login` return a `TokenResponse`:
 
 ```json
 {
@@ -76,9 +85,11 @@ Both return `TokenResponse`:
 }
 ```
 
-Tokens are signed HS256 with `JWT_SECRET_KEY` from `.env`. In dev the secret is auto-generated and logged once at startup; in production it must be set or the app refuses to start.
+`/refresh` returns the same shape. `/me` returns a `UserPublic`.
 
-The `/auth/refresh` endpoint and protected-route middleware arrive on Day 6.
+Tokens are signed HS256 with `JWT_SECRET_KEY` from `.env`. In dev the secret is auto-generated and logged once at startup; in production it must be set or the app refuses to start. Access tokens expire in 15 minutes; refresh tokens in 7 days. Refresh tokens do not rotate — the same refresh token stays valid for its full TTL.
+
+Protected routes use the `get_current_user` dependency in `app/api/deps.py`, which decodes the bearer token and looks up the user. A missing/expired/wrong-type token returns 401 with `WWW-Authenticate: Bearer`; a disabled user returns 403.
 
 ## Test
 
@@ -122,13 +133,13 @@ backend/
       user.py            User table
     schemas/             Pydantic request/response models
       user.py            UserPublic
-      auth.py            RegisterRequest, LoginRequest, TokenResponse
+      auth.py            RegisterRequest, LoginRequest, RefreshRequest, TokenResponse
     api/
-      deps.py            shared FastAPI dependencies
+      deps.py            shared FastAPI dependencies (get_current_user)
       v1/
         router.py        v1 router aggregator
         health.py        GET /api/v1/health
-        auth.py          POST /api/v1/auth/register, /api/v1/auth/login
+        auth.py          /api/v1/auth/{register,login,refresh,me}
   migrations/
     env.py               Alembic env (sync engine, reads from Settings)
     script.py.mako
@@ -140,5 +151,5 @@ tests/
   test_db.py             /health, SELECT 1, Alembic layout sanity
   test_passwords.py      PasswordHasher unit tests
   test_user_model.py     User ORM round-trip + uniqueness + case-insensitive
-  test_auth.py           register + login endpoints, JWT claim shape
+  test_auth.py           register, login, refresh, me; JWT claim shape; auth errors
 ```
