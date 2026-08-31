@@ -104,6 +104,18 @@ uv run ruff check .
 uv run ruff format .
 ```
 
+## Storage
+
+Documents are stored on the local filesystem under `<STORAGE_ROOT>/<owner_uuid>/<doc_uuid>.<ext>`
+(default `./var/documents`). The `Storage` Protocol in `app/storage/base.py` is implemented by
+`LocalDiskStorage` (`app/storage/local.py`), which performs atomic writes via `tmp + os.replace`
+and rejects path-traversal keys. An S3-compatible backend can be swapped in later (Phase 7) behind
+the same Protocol without touching call sites.
+
+The current `Document` model lives in `app/models/document.py`; its public schema is
+`DocumentPublic` in `app/schemas/document.py`. File metadata is indexed in Postgres; file bytes
+live on disk.
+
 ## Migrations
 
 Alembic config lives in `alembic.ini`; migrations in `migrations/versions/`.
@@ -131,9 +143,14 @@ backend/
       session.py         AsyncEngine + sessionmaker + get_db dependency
     models/              SQLAlchemy ORM models
       user.py            User table
+      document.py        Document table + DocumentStatus enum
     schemas/             Pydantic request/response models
       user.py            UserPublic
       auth.py            RegisterRequest, LoginRequest, RefreshRequest, TokenResponse
+      document.py        DocumentPublic
+    storage/             Storage abstraction
+      base.py            Storage Protocol
+      local.py           LocalDiskStorage (atomic writes, traversal protection)
     api/
       deps.py            shared FastAPI dependencies (get_current_user)
       v1/
@@ -152,4 +169,6 @@ tests/
   test_passwords.py      PasswordHasher unit tests
   test_user_model.py     User ORM round-trip + uniqueness + case-insensitive
   test_auth.py           register, login, refresh, me; JWT claim shape; auth errors
+  test_document_model.py Document ORM round-trip + FK + cascade + schema validation
+  test_storage_local.py  LocalDiskStorage: put/get/delete/exists/size + atomicity + traversal rejection
 ```
