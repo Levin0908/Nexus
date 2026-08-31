@@ -1,4 +1,5 @@
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -34,6 +35,9 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_access_ttl_minutes: int = 15
     jwt_refresh_ttl_days: int = 7
+
+    storage_root: Path = Path("./var/documents")
+    storage_max_file_size_bytes: int = 100 * 1024 * 1024
 
     @computed_field  # type: ignore[prop-decorator]
     @property

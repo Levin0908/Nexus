@@ -51,6 +51,7 @@ logs/
 uploads/
 data/raw/
 data/index/
+var/
 
 # ── Docker / misc ──────────────────────────────────────
 *.pid
