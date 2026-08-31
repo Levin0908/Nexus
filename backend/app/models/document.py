@@ -10,6 +10,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
+    Text,
     func,
     text,
 )
@@ -62,6 +63,7 @@ class Document(Base):
         nullable=False,
         server_default=text("'uploading'"),
     )
+    extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

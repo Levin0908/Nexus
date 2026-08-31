@@ -116,6 +116,27 @@ The current `Document` model lives in `app/models/document.py`; its public schem
 `DocumentPublic` in `app/schemas/document.py`. File metadata is indexed in Postgres; file bytes
 live on disk.
 
+## Documents
+
+Upload a file as multipart/form-data. The file is streamed, hashed (sha256), written to local
+storage, and — for PDF / DOCX / TXT — extracted to plain text in the same request. Documents that
+fail extraction are inserted with `status=failed` and `extracted_text=null`; the file itself stays
+on disk so extraction can be retried later.
+
+```bash
+# Upload (returns DocumentPublic 201)
+curl -X POST http://127.0.0.1:8000/api/v1/documents \
+  -H "Authorization: Bearer <access-token>" \
+  -F "file=@./paper.pdf;type=application/pdf"
+
+# Errors: 401 (no auth), 413 (over the configured size cap), 422 (missing file part)
+```
+
+The default size cap is 100 MiB (`STORAGE_MAX_FILE_SIZE_BYTES`). Filenames are sanitized
+(path components and null bytes stripped, length-capped) — the storage key is built from the
+owner UUID + a server-generated document UUID + the sanitized extension, so caller-supplied paths
+can never escape the storage root.
+
 ## Migrations
 
 Alembic config lives in `alembic.ini`; migrations in `migrations/versions/`.
@@ -143,7 +164,7 @@ backend/
       session.py         AsyncEngine + sessionmaker + get_db dependency
     models/              SQLAlchemy ORM models
       user.py            User table
-      document.py        Document table + DocumentStatus enum
+      document.py        Document table + DocumentStatus enum + extracted_text
     schemas/             Pydantic request/response models
       user.py            UserPublic
       auth.py            RegisterRequest, LoginRequest, RefreshRequest, TokenResponse
@@ -151,12 +172,16 @@ backend/
     storage/             Storage abstraction
       base.py            Storage Protocol
       local.py           LocalDiskStorage (atomic writes, traversal protection)
+    services/            Business logic (route → service → db/storage)
+      documents.py       Upload pipeline: hash, size-cap, write, extract, insert
+      extraction.py      PDF / DOCX / TXT → plain text
     api/
-      deps.py            shared FastAPI dependencies (get_current_user)
+      deps.py            shared FastAPI dependencies (get_current_user, get_storage)
       v1/
         router.py        v1 router aggregator
         health.py        GET /api/v1/health
         auth.py          /api/v1/auth/{register,login,refresh,me}
+        documents.py     POST /api/v1/documents (upload)
   migrations/
     env.py               Alembic env (sync engine, reads from Settings)
     script.py.mako
@@ -171,4 +196,7 @@ tests/
   test_auth.py           register, login, refresh, me; JWT claim shape; auth errors
   test_document_model.py Document ORM round-trip + FK + cascade + schema validation
   test_storage_local.py  LocalDiskStorage: put/get/delete/exists/size + atomicity + traversal rejection
+  test_upload.py         POST /documents: auth, size cap, sanitization, extension dispatch, extraction
+  test_extraction.py     PDF / DOCX / TXT extraction, corrupted inputs, case-insensitive
+  fixtures/              sample.{pdf,docx,txt} binary inputs for extraction tests
 ```

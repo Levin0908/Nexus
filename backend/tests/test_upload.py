@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -258,3 +259,89 @@ async def test_storage_extension_dispatch(client, filename: str, expected_ext: s
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["storage_path"].endswith(expected_ext)
+
+
+# ─── Day 9: extraction-aware upload cases ───────────────────────────────────
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+async def test_upload_pdf_extracts_text_and_returns_ready(client, test_storage) -> None:
+    token = await _register(client)
+    pdf_bytes = (FIXTURES / "sample.pdf").read_bytes()
+
+    resp = await _upload(
+        client,
+        token,
+        filename="sample.pdf",
+        content=pdf_bytes,
+        content_type="application/pdf",
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "ready"
+    assert body["extracted_text"] is not None
+    assert "Hello, world from PDF" in body["extracted_text"]
+    # File still landed on disk.
+    assert test_storage.exists(body["storage_path"])
+
+
+async def test_upload_corrupted_pdf_returns_failed_with_text_null(client, test_storage) -> None:
+    token = await _register(client)
+    bogus = b"\x00\x01\x02this is not a valid pdf file at all"
+
+    resp = await _upload(
+        client,
+        token,
+        filename="corrupt.pdf",
+        content=bogus,
+        content_type="application/pdf",
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "failed"
+    assert body["extracted_text"] is None
+    # File still landed on disk (operator can re-extract later).
+    assert test_storage.exists(body["storage_path"])
+    assert test_storage.get(body["storage_path"]) == bogus
+
+
+async def test_upload_txt_extracts_text_content(client) -> None:
+    token = await _register(client)
+    txt_bytes = (FIXTURES / "sample.txt").read_bytes()
+
+    resp = await _upload(
+        client,
+        token,
+        filename="sample.txt",
+        content=txt_bytes,
+        content_type="text/plain",
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "ready"
+    assert body["extracted_text"] == txt_bytes.decode("utf-8")
+    assert "Hello, world from TXT" in body["extracted_text"]
+
+
+async def test_upload_docx_extracts_text_content(client) -> None:
+    token = await _register(client)
+    docx_bytes = (FIXTURES / "sample.docx").read_bytes()
+
+    resp = await _upload(
+        client,
+        token,
+        filename="sample.docx",
+        content=docx_bytes,
+        content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["status"] == "ready"
+    assert body["extracted_text"] is not None
+    assert "Hello, world from DOCX" in body["extracted_text"]

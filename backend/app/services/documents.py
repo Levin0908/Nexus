@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.models.document import Document, DocumentStatus
 from app.models.user import User
+from app.services.extraction import ExtractionError, extract
 from app.storage import Storage
 
 _FILENAME_MAX_LEN = 255
@@ -117,7 +118,16 @@ async def create_document_from_upload(
         spool.seek(0)
 
     storage.put_file_obj(key, spool)
+    spool.seek(0)
+    content_bytes = spool.read()
     spool.close()
+
+    try:
+        extracted_text = extract(safe_filename, content_bytes)
+        status = DocumentStatus.READY
+    except ExtractionError:
+        extracted_text = None
+        status = DocumentStatus.FAILED
 
     document = Document(
         id=doc_id,
@@ -127,7 +137,8 @@ async def create_document_from_upload(
         size_bytes=size,
         storage_path=key,
         sha256=hasher.hexdigest(),
-        status=DocumentStatus.READY,
+        status=status,
+        extracted_text=extracted_text,
     )
     db.add(document)
     try:

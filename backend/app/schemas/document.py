@@ -19,5 +19,6 @@ class DocumentPublic(BaseModel):
     storage_path: str
     sha256: str
     status: DocumentStatus
+    extracted_text: str | None
     created_at: datetime
     updated_at: datetime
