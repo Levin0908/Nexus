@@ -1,10 +1,14 @@
 """Pytest fixtures shared across tests."""
 
+from pathlib import Path
+
 import httpx
 import pytest_asyncio
 
+from app.api.deps import get_storage
 from app.db.session import SessionLocal, engine
 from app.main import app
+from app.storage.local import LocalDiskStorage
 
 
 @pytest_asyncio.fixture
@@ -22,10 +26,24 @@ async def client() -> httpx.AsyncClient:
 
 
 @pytest_asyncio.fixture(autouse=True)
+async def test_storage(tmp_path: Path):
+    """Per-test isolated Storage instance.
+
+    Autouse so every test gets a fresh tmp dir for file writes (no real
+    `./var/documents` pollution). The yielded value lets tests that need to
+    inspect on-disk state do so without re-resolving the override.
+    """
+    storage = LocalDiskStorage(tmp_path)
+    app.dependency_overrides[get_storage] = lambda: storage
+    yield storage
+    app.dependency_overrides.pop(get_storage, None)
+
+
+@pytest_asyncio.fixture(autouse=True)
 async def _cleanup_test_users() -> None:
     """Wipe any user rows created by tests after each test runs.
 
-    Tests use the `test-*@example.com` email pattern. After the test, we delete
+    Tests use the `test-%@example.com` email pattern. After the test, we delete
     any matching rows so reruns and ordering don't collide.
     """
     yield
@@ -35,6 +53,19 @@ async def _cleanup_test_users() -> None:
 
     async with SessionLocal() as session:
         await session.execute(delete(User).where(User.email.like("test-%@example.com")))
+        await session.commit()
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _cleanup_test_documents() -> None:
+    """Wipe any document rows created by tests after each test runs."""
+    yield
+    from sqlalchemy import delete
+
+    from app.models.document import Document
+
+    async with SessionLocal() as session:
+        await session.execute(delete(Document))
         await session.commit()
 
 

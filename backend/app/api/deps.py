@@ -10,10 +10,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import decode_token
 from app.db.session import get_db
 from app.models.user import User
+from app.storage import Storage
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 DbSession = Annotated[AsyncSession, Depends(get_db)]
+
+
+def get_storage() -> Storage:
+    """Resolve the singleton Storage instance.
+
+    Wrapping the import in a function lets tests override this dependency
+    via `app.dependency_overrides[get_storage] = lambda: LocalDiskStorage(tmp_path)`
+    to point uploads at an isolated temporary directory without monkeypatching
+    module attributes.
+    """
+    from app.storage import storage
+
+    return storage
+
+
+StorageDep = Annotated[Storage, Depends(get_storage)]
 
 
 async def get_current_user(

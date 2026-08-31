@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import BinaryIO
 
 from app.storage.base import Storage
+
+_WRITE_CHUNK = 64 * 1024
 
 
 class LocalDiskStorage(Storage):
@@ -30,10 +34,8 @@ class LocalDiskStorage(Storage):
             raise ValueError(f"invalid storage key: {key!r}")
         return self._root / key
 
-    def put(self, key: str, data: bytes) -> None:
-        target = self._resolve(key)
+    def _atomic_write(self, target: Path, write: Callable[[BinaryIO], None]) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
-
         fd, tmp_path = tempfile.mkstemp(
             dir=target.parent,
             prefix=f".{target.name}.",
@@ -41,13 +43,33 @@ class LocalDiskStorage(Storage):
         )
         try:
             with os.fdopen(fd, "wb") as f:
-                f.write(data)
+                write(f)
                 f.flush()
                 os.fsync(f.fileno())
             os.replace(tmp_path, target)
         except Exception:
             Path(tmp_path).unlink(missing_ok=True)
             raise
+
+    def put(self, key: str, data: bytes) -> None:
+        def write(f: BinaryIO) -> None:
+            f.write(data)
+
+        self._atomic_write(self._resolve(key), write)
+
+    def put_file_obj(self, key: str, fp: BinaryIO) -> None:
+        """Stream bytes from a file-like object to storage without buffering."""
+        if hasattr(fp, "seek"):
+            fp.seek(0)
+
+        def write(f: BinaryIO) -> None:
+            while True:
+                chunk = fp.read(_WRITE_CHUNK)
+                if not chunk:
+                    break
+                f.write(chunk)
+
+        self._atomic_write(self._resolve(key), write)
 
     def get(self, key: str) -> bytes:
         return self._resolve(key).read_bytes()
