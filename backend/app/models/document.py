@@ -6,6 +6,7 @@ from enum import StrEnum
 
 from sqlalchemy import (
     BigInteger,
+    Computed,
     DateTime,
     ForeignKey,
     Index,
@@ -17,7 +18,7 @@ from sqlalchemy import (
 from sqlalchemy import (
     Enum as SAEnum,
 )
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -64,6 +65,14 @@ class Document(Base):
         server_default=text("'uploading'"),
     )
     extracted_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_vector: Mapped[str | None] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "to_tsvector('english', COALESCE(extracted_text, ''))",
+            persisted=True,
+        ),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -79,6 +88,11 @@ class Document(Base):
     __table_args__ = (
         Index("ix_documents_owner_id", "owner_id"),
         Index("ix_documents_sha256", "sha256"),
+        Index(
+            "ix_documents_search_vector",
+            "search_vector",
+            postgresql_using="gin",
+        ),
     )
 
     def __repr__(self) -> str:

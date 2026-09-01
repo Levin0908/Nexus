@@ -22,3 +22,21 @@ class DocumentPublic(BaseModel):
     extracted_text: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class DocumentSearchHit(BaseModel):
+    """Slim search result — same as DocumentPublic but no `extracted_text`, plus `rank`."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    owner_id: uuid.UUID
+    filename: str
+    mime_type: str
+    size_bytes: int
+    storage_path: str
+    sha256: str
+    status: DocumentStatus
+    rank: float
+    created_at: datetime
+    updated_at: datetime
