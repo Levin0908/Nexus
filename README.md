@@ -4,7 +4,7 @@
 
 ## Status
 
-Day 1 of the Foundation phase. Not yet functional. See [Roadmap](#roadmap) for where this is going.
+Day 11 of Phase 2 (MVP). Functional end-to-end: register, upload, extract text, search, view results. See [Roadmap](#roadmap) for where this is going.
 
 ## About
 
@@ -58,7 +58,17 @@ The API does validation and business logic only. Heavy lifting is delegated to w
 
 ## Getting Started
 
-Detailed setup instructions land in Day 2 (Python venv and FastAPI skeleton).
+**Backend** — see `backend/README.md`.
+- `cd backend`
+- `uv sync` (install)
+- `uv run alembic upgrade head` (apply migrations)
+- `uv run uvicorn app.main:app --reload` (run)
+
+**Frontend** — see `frontend/README.md` for full Next.js docs.
+- `cd frontend`
+- `npm install`
+- `cp .env.local.example .env.local`
+- `npm run dev` (Next.js on `http://localhost:3000`)
 
 ## License
 
