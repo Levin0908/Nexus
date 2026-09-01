@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import UploadFile
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -129,6 +130,24 @@ async def create_document_from_upload(
         extracted_text = None
         status = DocumentStatus.FAILED
 
+    sha256 = hasher.hexdigest()
+
+    # Dedup pre-check: if the same owner already has a document with this
+    # sha256, return the existing one without re-inserting. Delete the file
+    # we just wrote (it has a unique storage_path on disk; the existing row
+    # points at its own file, which we must NOT touch).
+    existing = (
+        await db.execute(
+            select(Document).where(
+                Document.owner_id == owner.id,
+                Document.sha256 == sha256,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing is not None:
+        storage.delete(key)
+        return existing
+
     document = Document(
         id=doc_id,
         owner_id=owner.id,
@@ -136,7 +155,7 @@ async def create_document_from_upload(
         mime_type=upload.content_type or "application/octet-stream",
         size_bytes=size,
         storage_path=key,
-        sha256=hasher.hexdigest(),
+        sha256=sha256,
         status=status,
         extracted_text=extracted_text,
     )
@@ -144,9 +163,20 @@ async def create_document_from_upload(
     try:
         await db.commit()
     except IntegrityError:
-        storage.delete(key)
+        # Race-condition fallback: a concurrent upload of the same file beat us
+        # to the unique-constraint insertion. Same outcome as the pre-check:
+        # delete the file we just wrote, return the now-existing row.
         await db.rollback()
-        raise
+        storage.delete(key)
+        winner = (
+            await db.execute(
+                select(Document).where(
+                    Document.owner_id == owner.id,
+                    Document.sha256 == sha256,
+                )
+            )
+        ).scalar_one()
+        return winner
 
     await db.refresh(document)
     return document

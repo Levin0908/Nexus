@@ -8,6 +8,8 @@ import uuid
 from pathlib import Path
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 
 async def _register(client, email: str | None = None, password: str = "test-password-123") -> str:
@@ -345,3 +347,142 @@ async def test_upload_docx_extracts_text_content(client) -> None:
     assert body["status"] == "ready"
     assert body["extracted_text"] is not None
     assert "Hello, world from DOCX" in body["extracted_text"]
+
+
+# ─── Day 12: dedup behavior ────────────────────────────────────────────────
+
+
+async def test_upload_same_content_twice_returns_existing_doc(client, test_storage) -> None:
+    token = await _register(client)
+    payload = b"duplicate content"
+
+    first = await _upload(
+        client,
+        token,
+        filename="first.txt",
+        content=payload,
+        content_type="text/plain",
+    )
+    assert first.status_code == 201, first.text
+    first_id = first.json()["id"]
+    first_storage_path = first.json()["storage_path"]
+
+    second = await _upload(
+        client,
+        token,
+        filename="second.txt",  # different display name; same bytes
+        content=payload,
+        content_type="text/plain",
+    )
+    assert second.status_code == 201, second.text
+    second_body = second.json()
+
+    # Returns the EXISTING document — same id, same storage path, same sha256.
+    assert second_body["id"] == first_id
+    assert second_body["storage_path"] == first_storage_path
+    assert second_body["filename"] == "first.txt", (
+        "second upload should expose the original filename, not the new one"
+    )
+
+    # The second file was cleaned up; only the first file remains on disk.
+    files_on_disk = [p for p in test_storage.root.rglob("*") if p.is_file()]
+    assert len(files_on_disk) == 1
+
+
+async def test_upload_same_content_different_owner_creates_two_rows(client, test_storage) -> None:
+    """The constraint is per-owner, not global — same sha256 across users is fine."""
+    tok_a = await _register(client, email=f"test-a-{uuid.uuid4()}@example.com")
+    tok_b = await _register(client, email=f"test-b-{uuid.uuid4()}@example.com")
+    payload = b"shared file between two users"
+
+    ra = await _upload(
+        client,
+        tok_a,
+        filename="shared.txt",
+        content=payload,
+        content_type="text/plain",
+    )
+    rb = await _upload(
+        client,
+        tok_b,
+        filename="shared.txt",
+        content=payload,
+        content_type="text/plain",
+    )
+
+    assert ra.status_code == 201 and rb.status_code == 201
+    assert ra.json()["id"] != rb.json()["id"]
+    assert ra.json()["sha256"] == rb.json()["sha256"]
+
+
+async def test_upload_different_content_same_filename_creates_two_rows(
+    client, test_storage
+) -> None:
+    """Same filename + different content = different sha256 = both rows kept."""
+    token = await _register(client)
+
+    r1 = await _upload(
+        client,
+        token,
+        filename="name.txt",
+        content=b"alpha content",
+        content_type="text/plain",
+    )
+    r2 = await _upload(
+        client,
+        token,
+        filename="name.txt",
+        content=b"beta content",
+        content_type="text/plain",
+    )
+
+    assert r1.status_code == 201 and r2.status_code == 201
+    assert r1.json()["id"] != r2.json()["id"]
+    assert r1.json()["sha256"] != r2.json()["sha256"]
+
+
+async def test_dedup_direct_db_unique_constraint() -> None:
+    """The DB-level unique constraint is the backstop. Exercise it directly."""
+    import uuid
+
+    from app.core.security import password_hasher
+    from app.db.session import SessionLocal
+    from app.models.document import Document, DocumentStatus
+    from app.models.user import User
+
+    email = f"test-dedup-{uuid.uuid4()}@example.com"
+    async with SessionLocal() as session:
+        session.add(User(email=email, password_hash=password_hasher.hash("pw")))
+        await session.commit()
+        user = (await session.execute(select(User).where(User.email == email))).scalar_one()
+
+    common_sha = "f" * 64
+    async with SessionLocal() as session:
+        session.add(
+            Document(
+                owner_id=user.id,
+                filename="a.txt",
+                mime_type="text/plain",
+                size_bytes=1,
+                storage_path="a/a.txt",
+                sha256=common_sha,
+                status=DocumentStatus.READY,
+            )
+        )
+        await session.commit()
+
+    async with SessionLocal() as session:
+        session.add(
+            Document(
+                owner_id=user.id,
+                filename="b.txt",
+                mime_type="text/plain",
+                size_bytes=1,
+                storage_path="b/b.txt",
+                sha256=common_sha,
+                status=DocumentStatus.READY,
+            )
+        )
+        with pytest.raises(IntegrityError):
+            await session.commit()
+        await session.rollback()

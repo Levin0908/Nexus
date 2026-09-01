@@ -12,7 +12,7 @@ interface Props {
 
 export function AuthForm({ mode }: Props) {
   const router = useRouter();
-  const { setEmail } = useAuth();
+  const { setEmail, signIn } = useAuth();
   const [email, setEmailInput] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -29,6 +29,9 @@ export function AuthForm({ mode }: Props) {
           : await api.register(email, password);
       api.setTokens(tokens);
       setEmail(email);
+      // Tell React we're now authenticated, otherwise /app's effect
+      // (which reads `useAuth().authenticated`) will bounce us back to /login.
+      signIn();
       router.push("/app");
     } catch (err) {
       if (err instanceof ApiError) {

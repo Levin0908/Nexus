@@ -12,6 +12,7 @@ from sqlalchemy import (
     Index,
     String,
     Text,
+    UniqueConstraint,
     func,
     text,
 )
@@ -87,7 +88,11 @@ class Document(Base):
 
     __table_args__ = (
         Index("ix_documents_owner_id", "owner_id"),
-        Index("ix_documents_sha256", "sha256"),
+        UniqueConstraint(
+            "owner_id",
+            "sha256",
+            name="uq_documents_owner_sha256",
+        ),
         Index(
             "ix_documents_search_vector",
             "search_vector",

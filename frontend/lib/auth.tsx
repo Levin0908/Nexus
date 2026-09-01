@@ -18,12 +18,15 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   setEmail: (email: string | null) => void;
+  signIn: () => void;
   signOut: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 const EMAIL_KEY = "nexus_email";
+const ACCESS_KEY = "nexus_access_token";
+const REFRESH_KEY = "nexus_refresh_token";
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const router = useRouter();
@@ -34,36 +37,46 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   });
 
   useEffect(() => {
-    // Hydrate on first mount: read tokens + cached email from localStorage.
-    const hasTokens =
-      typeof window !== "undefined" &&
-      !!localStorage.getItem("nexus_access_token");
-    const email =
-      typeof window !== "undefined" ? localStorage.getItem(EMAIL_KEY) : null;
+    // Initial mount hydration: read tokens + cached email from localStorage.
+    const hasTokens = !!localStorage.getItem(ACCESS_KEY);
+    const email = localStorage.getItem(EMAIL_KEY);
     setState({ authenticated: hasTokens, hydrated: true, email });
   }, []);
 
   const setEmail = useCallback((email: string | null) => {
-    if (typeof window !== "undefined") {
-      if (email) localStorage.setItem(EMAIL_KEY, email);
-      else localStorage.removeItem(EMAIL_KEY);
-    }
+    if (email) localStorage.setItem(EMAIL_KEY, email);
+    else localStorage.removeItem(EMAIL_KEY);
     setState((s) => ({ ...s, email }));
   }, []);
 
+  /**
+   * Mark the user as authenticated in React state.
+   *
+   * Why this exists: `api.setTokens(...)` only writes to localStorage. It
+   * does not (and cannot, safely) update React state from inside the api
+   * layer. Without this, the next render of `useAuth()` still sees
+   * `authenticated: false` and protected routes bounce back to /login.
+   *
+   * Caller pattern after login/register:
+   *     api.setTokens(tokens);  // localStorage
+   *     signIn();                // React state
+   *     router.push("/app");
+   */
+  const signIn = useCallback(() => {
+    setState((s) => ({ ...s, authenticated: true }));
+  }, []);
+
   const signOut = useCallback(() => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("nexus_access_token");
-      localStorage.removeItem("nexus_refresh_token");
-      localStorage.removeItem(EMAIL_KEY);
-    }
+    localStorage.removeItem(ACCESS_KEY);
+    localStorage.removeItem(REFRESH_KEY);
+    localStorage.removeItem(EMAIL_KEY);
     setState({ authenticated: false, hydrated: true, email: null });
     router.push("/login");
   }, [router]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ ...state, setEmail, signOut }),
-    [state, setEmail, signOut],
+    () => ({ ...state, setEmail, signIn, signOut }),
+    [state, setEmail, signIn, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
