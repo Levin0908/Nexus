@@ -1,7 +1,7 @@
 import uuid
 
 import pytest
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.core.security import password_hasher
@@ -12,7 +12,14 @@ from app.models.user import User
 
 @pytest.fixture
 async def fresh_user() -> User:
-    """Create and return a test user; cleaned up by the autouse fixture."""
+    """Create and return a test user; cleaned up by the autouse fixture.
+
+    Documents created during these tests are cleaned up implicitly via
+    `ON DELETE CASCADE` from `_cleanup_test_users` in conftest.py — no
+    separate per-test document cleanup needed (and historically there
+    was one, but it did `delete(Document)` unfiltered, which wiped any
+    rows a running uvicorn had created).
+    """
     email = f"test-{uuid.uuid4()}@example.com"
     async with SessionLocal() as session:
         user = User(email=email, password_hash=password_hasher.hash("pw"))
@@ -22,16 +29,7 @@ async def fresh_user() -> User:
     return user
 
 
-@pytest.fixture
-async def _cleanup_documents() -> None:
-    """Wipe any documents created during a test (after teardown)."""
-    yield
-    async with SessionLocal() as session:
-        await session.execute(delete(Document))
-        await session.commit()
-
-
-async def test_create_and_retrieve_document(fresh_user: User, _cleanup_documents: None) -> None:
+async def test_create_and_retrieve_document(fresh_user: User) -> None:
     owner_id = fresh_user.id
     doc = Document(
         owner_id=owner_id,
@@ -65,7 +63,7 @@ async def test_create_and_retrieve_document(fresh_user: User, _cleanup_documents
         assert fetched.filename == "notes.pdf"
 
 
-async def test_status_can_be_set_explicitly(fresh_user: User, _cleanup_documents: None) -> None:
+async def test_status_can_be_set_explicitly(fresh_user: User) -> None:
     async with SessionLocal() as session:
         doc = Document(
             owner_id=fresh_user.id,
@@ -83,7 +81,7 @@ async def test_status_can_be_set_explicitly(fresh_user: User, _cleanup_documents
     assert doc.status is DocumentStatus.READY
 
 
-async def test_owner_id_fk_is_required(fresh_user: User, _cleanup_documents: None) -> None:
+async def test_owner_id_fk_is_required(fresh_user: User) -> None:
     async with SessionLocal() as session:
         session.add(
             Document(
@@ -100,9 +98,7 @@ async def test_owner_id_fk_is_required(fresh_user: User, _cleanup_documents: Non
         await session.rollback()
 
 
-async def test_invalid_owner_id_raises_integrity_error(
-    fresh_user: User, _cleanup_documents: None
-) -> None:
+async def test_invalid_owner_id_raises_integrity_error(fresh_user: User) -> None:
     bogus = uuid.uuid4()
     async with SessionLocal() as session:
         session.add(
@@ -120,7 +116,7 @@ async def test_invalid_owner_id_raises_integrity_error(
         await session.rollback()
 
 
-async def test_cascade_delete_with_owner(fresh_user: User, _cleanup_documents: None) -> None:
+async def test_cascade_delete_with_owner(fresh_user: User) -> None:
     async with SessionLocal() as session:
         doc = Document(
             owner_id=fresh_user.id,
@@ -146,7 +142,7 @@ async def test_cascade_delete_with_owner(fresh_user: User, _cleanup_documents: N
         assert survivor is None, "document should be cascade-deleted with its owner"
 
 
-async def test_public_schema_validates_from_orm(fresh_user: User, _cleanup_documents: None) -> None:
+async def test_public_schema_validates_from_orm(fresh_user: User) -> None:
     from app.schemas.document import DocumentPublic
 
     async with SessionLocal() as session:

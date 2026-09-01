@@ -41,10 +41,15 @@ async def test_storage(tmp_path: Path):
 
 @pytest_asyncio.fixture(autouse=True)
 async def _cleanup_test_users() -> None:
-    """Wipe any user rows created by tests after each test runs.
+    """Wipe test users (and their docs via ON DELETE CASCADE) after each test runs.
 
     Tests use the `test-%@example.com` email pattern. After the test, we delete
-    any matching rows so reruns and ordering don't collide.
+    any matching rows so reruns and ordering don't collide. Documents owned by
+    these users cascade-delete automatically via the FK on `documents.owner_id`
+    — see migration `73515ccace6e_create_documents_table.py`. We no longer run
+    a separate `_cleanup_test_documents` because an unfiltered `delete(Document)`
+    would erase any rows a live uvicorn instance had created, since pytest and
+    dev share the same Postgres database.
     """
     yield
     from sqlalchemy import delete  # local import keeps top of file clean
@@ -53,19 +58,6 @@ async def _cleanup_test_users() -> None:
 
     async with SessionLocal() as session:
         await session.execute(delete(User).where(User.email.like("test-%@example.com")))
-        await session.commit()
-
-
-@pytest_asyncio.fixture(autouse=True)
-async def _cleanup_test_documents() -> None:
-    """Wipe any document rows created by tests after each test runs."""
-    yield
-    from sqlalchemy import delete
-
-    from app.models.document import Document
-
-    async with SessionLocal() as session:
-        await session.execute(delete(Document))
         await session.commit()
 
 
